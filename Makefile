@@ -1,6 +1,10 @@
 CC = gcc
-CFLAGS = -g -lm
-LDFLAGS_TEST = -lcriterion
+CFLAGS =-Wall -Wextra -Wpedantic -Wshadow -Wconversion \
+         -Wsign-conversion -Wformat=2 -Wundef \
+         -Wnull-dereference -Wdouble-promotion \
+         -fsanitize=address,undefined -fno-omit-frame-pointer -g
+LDFLAGS = -fsanitize=address,undefined -lm
+LDFLAGS_TEST = -lcriterion -lm
 
 # Files
 APP_SRCS = xprcalc.c main.c 
@@ -17,7 +21,7 @@ app: $(APP_TARGET)
 
 # Build the application
 $(APP_TARGET): $(APP_SRCS)
-	$(CC) $(CFLAGS) -o $@ $^ -O3 -march=native
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ -O3 -march=native
 
 # Build the test binary
 $(TEST_TARGET): $(TEST_SRCS)

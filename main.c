@@ -1,5 +1,4 @@
-#include "calculator.h"
-#include <stdio.h>
+#include "xprcalc.h"
 int main()
 {
   get_user_input();
