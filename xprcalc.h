@@ -6,6 +6,8 @@
 
 #define INPUT_BUFFER_SIZE 256
 #define RESULT_OK 0
+#define MAX_VARIABLES 256
+#define MAX_IDENTIFIER_NAME 10
 
 typedef enum
 {
@@ -21,6 +23,7 @@ typedef enum
   ERROR_MODULO_BY_ZERO,
   ERROR_UNKNOWN_OPERATION,
   ERROR_UNKNOWN_FUNCTION,
+  ERROR_UNKNOWN_VARIABLE,
   ERROR_NOT_INITIALIZED
 } error_t;
 
@@ -36,6 +39,7 @@ typedef enum
   TOKEN_LESS_EQUAL,
   TOKEN_GREATER_EQUAL,
   TOKEN_NUMBER,
+  TOKEN_ASSIGN,
   TOKEN_PLUS,
   TOKEN_MINUS,
   TOKEN_MULTIPLY,
@@ -45,6 +49,7 @@ typedef enum
   TOKEN_POWER,
   TOKEN_MODULO,
   TOKEN_FUNCTION,
+  TOKEN_VARIABLE,
   TOKEN_INVALID
 } token_type_t;
 
@@ -52,24 +57,30 @@ typedef struct
 {
   token_type_t type;
   double value; // only numbers will have a value
-  char functions[10];
+  char identifier[MAX_IDENTIFIER_NAME];
 } token_t;
 
 typedef struct
 {
-  const char *input;
+  char name[MAX_IDENTIFIER_NAME];
+  double value;
+  bool in_use;
+} variable_t;
+
+typedef struct
+{
   size_t pos;
+  const char *input;
   token_t current_token;
   error_t error_code;
-  bool has_error;
   bool is_logical_operator;
+  bool has_error;
 } parser_t;
-
 // function prototypes
 
 void skip_whitespace(parser_t *p);
 double parse_number(parser_t *p);
-token_t parse_function(parser_t *p);
+token_t parse_identifier(parser_t *p);
 token_t parse_boolean_op_token(parser_t *p);
 token_t parse_arithmetic_op_token(const char c);
 token_t get_next_token(parser_t *p);

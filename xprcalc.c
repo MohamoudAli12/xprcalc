@@ -3,12 +3,38 @@
 #include <math.h>
 #include <string.h>
 
+variable_t var_table[MAX_VARIABLES] = { 0 };
+
 void skip_whitespace(parser_t *p)
 {
   while (p->input[p->pos] && isspace(p->input[p->pos]))
   {
     p->pos++;
   }
+}
+
+int create_variable(const char *name)
+{
+  for (int i = 0; i < MAX_VARIABLES; i++)
+  {
+    if (!var_table[i].in_use)
+    {
+      var_table[i].in_use = true;
+      strncpy(var_table[i].name, name, MAX_IDENTIFIER_NAME);
+      return i;
+    }
+  }
+  return -1;
+}
+
+int find_variable(const char *name)
+{
+  for (int i = 0; i < MAX_VARIABLES; i++)
+  {
+    if (var_table[i].in_use && strcmp(var_table[i].name, name) == 0)
+      return i;
+  }
+  return -1;
 }
 
 int get_user_input(void)
@@ -96,12 +122,12 @@ token_t get_next_token(parser_t *p)
 
   if (c == '\0')
   {
-    return (token_t) { .type = TOKEN_EOF, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_EOF, .value = 0, .identifier = { 0 } };
   }
 
   if (isalpha(p->input[p->pos]))
   {
-    return parse_function(p);
+    return parse_identifier(p);
   }
 
   // Numeric tokens
@@ -111,9 +137,9 @@ token_t get_next_token(parser_t *p)
     if (p->has_error)
     {
       p->error_code = ERROR_PARSER;
-      return (token_t) { .type = TOKEN_INVALID, .value = 0, .functions = { 0 } };
+      return (token_t) { .type = TOKEN_INVALID, .value = 0, .identifier = { 0 } };
     }
-    return (token_t) { .type = TOKEN_NUMBER, .value = value, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_NUMBER, .value = value, .identifier = { 0 } };
   }
 
   token_t boolean_operator = parse_boolean_op_token(p);
@@ -125,33 +151,63 @@ token_t get_next_token(parser_t *p)
   p->pos++;
   return parse_arithmetic_op_token(c);
 }
-
 double parse_expression(parser_t *p, int min_precedence)
 {
   if (p->has_error)
-  {
     return -1;
+
+  if (p->current_token.type == TOKEN_VARIABLE)
+  {
+    token_t ident = p->current_token;
+    size_t saved_pos = p->pos;
+
+    advance(p);
+
+    if (p->current_token.type == TOKEN_ASSIGN)
+    {
+      advance(p);
+
+      double value = parse_expression(p, 0);
+      if (p->has_error)
+        return -1;
+
+      int idx = find_variable(ident.identifier);
+      if (idx == -1)
+        idx = create_variable(ident.identifier);
+
+      if (idx == -1)
+      {
+        p->has_error = true;
+        return -1;
+      }
+
+      var_table[idx].value = value;
+      return value;
+    }
+
+    p->pos = saved_pos;
+    p->current_token = ident;
   }
 
   double left = parse_primary(p);
   if (p->has_error)
-  {
     return -1;
-  }
 
-  while ((!p->has_error) && (get_precedence(p->current_token.type) > min_precedence))
+  while (!p->has_error && get_precedence(p->current_token.type) > min_precedence)
   {
     token_type_t op = p->current_token.type;
     int precedence = get_precedence(op);
 
     advance(p);
-    // if token is power then make right associative
+
     double right = parse_expression(p, (op == TOKEN_POWER) ? precedence - 1 : precedence);
+
     if (p->has_error)
       return -1;
 
     left = evaluate_operation(p, left, op, right);
   }
+
   return left;
 }
 
@@ -159,6 +215,8 @@ int get_precedence(token_type_t type)
 {
   switch (type)
   {
+  case TOKEN_ASSIGN:
+    return 0;
   case TOKEN_LOGICAL_OR:
     return 1;
   case TOKEN_LOGICAL_AND:
@@ -194,6 +252,24 @@ double parse_primary(parser_t *p)
   if (p->current_token.type == TOKEN_FUNCTION)
   {
     return evaluate_function(p);
+  }
+
+  if (p->current_token.type == TOKEN_VARIABLE)
+  {
+    char name[MAX_IDENTIFIER_NAME];
+    strncpy(name, p->current_token.identifier, sizeof(name));
+
+    advance(p);
+
+    int idx = find_variable(name);
+    if (idx == -1)
+    {
+      p->has_error = true;
+      p->error_code = ERROR_UNKNOWN_VARIABLE;
+      return 0;
+    }
+
+    return var_table[idx].value;
   }
 
   if (p->current_token.type == TOKEN_NUMBER)
@@ -283,31 +359,36 @@ double parse_number(parser_t *p)
   return result;
 }
 
-token_t parse_function(parser_t *p)
+token_t parse_identifier(parser_t *p)
 {
-  char function_name[10] = { 0 };
+  char name[MAX_IDENTIFIER_NAME] = { 0 };
   int i = 0;
 
-  while (isalpha(p->input[p->pos]) && i < 9)
+  while (isalnum(p->input[p->pos]) && i < MAX_IDENTIFIER_NAME - 1)
   {
-    function_name[i++] = p->input[p->pos++];
+    name[i++] = p->input[p->pos++];
   }
-  function_name[i] = '\0'; // null-terminate
 
-  // Create token and copy letters into token.functions
-  token_t token = { .type = TOKEN_FUNCTION, .value = 0, .functions = { 0 } };
-  for (int j = 0; j < 10; ++j)
+  token_t token = { 0 };
+
+  // Peek: function if next char is '('
+  if (p->input[p->pos] == '(')
   {
-    token.functions[j] = function_name[j];
+    token.type = TOKEN_FUNCTION;
+    strncpy(token.identifier, name, sizeof(token.identifier));
+  }
+  else
+  {
+    token.type = TOKEN_VARIABLE;
+    strncpy(token.identifier, name, sizeof(token.identifier));
   }
 
   return token;
 }
-
 double evaluate_function(parser_t *p)
 {
   char function_name[10];
-  strncpy(function_name, p->current_token.functions, sizeof(function_name));
+  strncpy(function_name, p->current_token.identifier, sizeof(function_name));
   advance(p);
   if (p->current_token.type != TOKEN_LPAREN)
   {
@@ -361,23 +442,23 @@ token_t parse_arithmetic_op_token(const char c)
   switch (c)
   {
   case '+':
-    return (token_t) { .type = TOKEN_PLUS, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_PLUS, .value = 0, .identifier = { 0 } };
   case '-':
-    return (token_t) { .type = TOKEN_MINUS, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_MINUS, .value = 0, .identifier = { 0 } };
   case '*':
-    return (token_t) { .type = TOKEN_MULTIPLY, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_MULTIPLY, .value = 0, .identifier = { 0 } };
   case '/':
-    return (token_t) { .type = TOKEN_DIVIDE, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_DIVIDE, .value = 0, .identifier = { 0 } };
   case '(':
-    return (token_t) { .type = TOKEN_LPAREN, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_LPAREN, .value = 0, .identifier = { 0 } };
   case ')':
-    return (token_t) { .type = TOKEN_RPAREN, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_RPAREN, .value = 0, .identifier = { 0 } };
   case '^':
-    return (token_t) { .type = TOKEN_POWER, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_POWER, .value = 0, .identifier = { 0 } };
   case '%':
-    return (token_t) { .type = TOKEN_MODULO, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_MODULO, .value = 0, .identifier = { 0 } };
   default:
-    return (token_t) { .type = TOKEN_INVALID, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_INVALID, .value = 0, .identifier = { 0 } };
   }
 }
 token_t parse_boolean_op_token(parser_t *p)
@@ -387,36 +468,41 @@ token_t parse_boolean_op_token(parser_t *p)
   if (c == '<')
   {
     p->pos += 1;
-    return (token_t) { .type = TOKEN_LESS_THAN, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_LESS_THAN, .value = 0, .identifier = { 0 } };
   }
   if (c == '>')
   {
     p->pos += 1;
-    return (token_t) { .type = TOKEN_GREATER_THAN, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_GREATER_THAN, .value = 0, .identifier = { 0 } };
   }
 
   if (c == '=' && next_c == '=')
   {
     p->pos += 2;
-    return (token_t) { .type = TOKEN_EQUAL, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_EQUAL, .value = 0, .identifier = { 0 } };
+  }
+  if (c == '=' && next_c != '=')
+  {
+    p->pos += 1;
+    return (token_t) { .type = TOKEN_ASSIGN, .value = 0, .identifier = { 0 } };
   }
   if (c == '!' && next_c == '=')
   {
     p->pos += 2;
-    return (token_t) { .type = TOKEN_NOT_EQUAL, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_NOT_EQUAL, .value = 0, .identifier = { 0 } };
   }
   if (c == '<' && next_c == '=')
   {
     p->pos += 2;
-    return (token_t) { .type = TOKEN_LESS_EQUAL, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_LESS_EQUAL, .value = 0, .identifier = { 0 } };
   }
   if (c == '>' && next_c == '=')
   {
     p->pos += 2;
-    return (token_t) { .type = TOKEN_GREATER_EQUAL, .value = 0, .functions = { 0 } };
+    return (token_t) { .type = TOKEN_GREATER_EQUAL, .value = 0, .identifier = { 0 } };
   }
 
-  return (token_t) { .type = TOKEN_INVALID, .value = 0, .functions = { 0 } }; // If not matched
+  return (token_t) { .type = TOKEN_INVALID, .value = 0, .identifier = { 0 } }; // If not matched
 }
 
 double evaluate_operation(parser_t *p, double left, token_type_t op, double right)

@@ -108,6 +108,14 @@ Test(calculator_logical, not_equal_true, .init = redirect_all_std)
   cr_assert_stdout_eq_str("Result: true\n");
 }
 
+// --- VARIABLES ---
+
+Test(calculator_variables, assign, .init = redirect_all_std)
+{
+  evaluate("a=1");
+  cr_assert_stdout_eq_str("Result: 1.000\n");
+}
+
 // --- ERROR CASES ---
 
 Test(calculator_errors, division_by_zero, .init = redirect_all_std)
